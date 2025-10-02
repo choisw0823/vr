@@ -1,0 +1,138 @@
+data:
+  # === Geometry3K 경로 ===
+  train_files: /home/work/smoretalk/seo/reranking/r1/data/msrvtt_ranking_dataset.json
+  val_files: /home/work/smoretalk/seo/reranking/r1/data/val_ranking_dataset.json
+
+  # === 컬럼 매핑 (RankLLMRerankDataset은 고정 구조 사용) ===
+  # prompt_key: query (고정)
+  # answer_key: ground_truth (고정)  
+  # image_key: frames (고정)
+  # video_key: 미사용
+
+
+  # === 길이/배치 ===
+  max_prompt_length: 1024
+  max_response_length: 1024
+  rollout_batch_size: 8      # vRAM 상황 봐가며 올리기
+  mini_rollout_batch_size: null
+  val_batch_size: 8
+  shuffle: true
+  seed: 1
+  min_pixels: 50176
+  max_pixels: 50176
+  filter_overlong_prompts: true
+
+  # (선택) Vision Reasoning용 프롬프트 템플릿 파일 경로
+  # 실제 파일이 있을 때만 켜기
+  format_prompt: ./reranking.jinja
+  override_chat_template: null
+  video_fps: 2.0
+
+algorithm:
+  adv_estimator: grpo
+  disable_kl: false          # KL 비활성
+  use_kl_loss: true
+  kl_penalty: low_var_kl
+  kl_coef: 1.0e-2
+  online_filtering: false
+  filter_key: overall
+  filter_low: 0.01
+  filter_high: 0.99
+
+worker:
+  actor:
+    global_batch_size: 4
+    micro_batch_size_per_device_for_update: 1
+    micro_batch_size_per_device_for_experience: 1
+    max_grad_norm: 1.0
+    padding_free: true
+
+    dynamic_batching: true
+    ulysses_size: 1
+
+    model:
+      model_path: /home/work/smoretalk/seo/reranking/sft_training/outputs
+      enable_gradient_checkpointing: true
+      trust_remote_code: false
+      freeze_vision_tower: true
+
+    optim:
+      lr: 1.0e-6
+      weight_decay: 1.0e-2
+      strategy: adamw
+      lr_warmup_ratio: 0.0
+
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: false
+      enable_rank0_init: true
+      torch_dtype: bf16
+
+    offload:
+      offload_params: true
+      offload_optimizer: true
+
+  rollout:
+    # 샘플링 파라미터
+    n: 8
+    temperature: 0.7
+    top_p: 0.9
+
+    # 이미지/메모리/엔진
+    limit_images: 60
+    gpu_memory_utilization: 0.6
+    enforce_eager: true
+    enable_chunked_prefill: true
+
+    # 병렬/길이 제약 (vLLM)
+    tensor_parallel_size: 1
+    # model context window (vLLM 엔진 쪽 최대)
+    max_model_len: 24576
+    # 프롬프트/응답 길이 (합이 max_model_len 이하여야 안전)
+    prompt_length: 1024
+    response_length: 1024
+    # 배치 토큰 상한 (합보다 커야 함)
+    max_num_batched_tokens: 196608
+
+    disable_tqdm: false
+
+    val_override_config:
+      temperature: 0.7
+      top_p: 0.9
+      n: 1
+
+  ref:
+    fsdp:
+      enable_full_shard: true
+      enable_cpu_offload: true
+      enable_rank0_init: true
+    offload:
+      offload_params: false
+
+  reward:
+    reward_type: batch
+    reward_function: ./ranking_reward.py:compute_rewards_batch
+
+trainer:
+  total_epochs: 3
+  max_steps: null
+  project_name: easy_r1_msrvtt
+  experiment_name: qwen2_5_vl_3b_msrvtt_grpo_1gpu
+  logger: ["console", "wandb"]
+
+  nnodes: 1
+  n_gpus_per_node: 1
+
+  max_try_make_batch: 20
+  val_freq: 50
+  val_before_train: true
+  val_only: false
+  val_generations_to_log: 5
+
+  # 체크포인트: 디스크 폭주 방지
+  save_freq: 200
+  save_limit: 2
+  save_model_only: true
+  save_checkpoint_path: null
+  load_checkpoint_path: null
+  find_last_checkpoint: true
