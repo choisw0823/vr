@@ -54,12 +54,10 @@ def _process_multi_modal_data(
 ) -> dict[str, Any]:
     # may convert image path to image object
     images, videos = [], []
-    
-    # RankLLMRerankDataset에서 'frames' 키로 이미지 경로들이 전달됨
     if "frames" in multi_modal_data:
         for frame_path in multi_modal_data["frames"]:
             images.append(process_image(frame_path, min_pixels, max_pixels))
-    
+            
     if "images" in multi_modal_data:
         for image in multi_modal_data["images"]:
             images.append(process_image(image, min_pixels, max_pixels))
@@ -95,11 +93,8 @@ class vLLMRollout(BaseRollout):
         super().__init__()
         self.rank = int(os.getenv("RANK", "0"))
         self.config = config
-        self.tokenizer = tokenizer
-        self.processor = processor
         self.pad_token_id = tokenizer.pad_token_id
         self.use_tqdm = (self.rank == 0) and (not config.disable_tqdm)
-        
         if config.tensor_parallel_size > torch.distributed.get_world_size():
             raise ValueError("Tensor parallelism size should be less than world size.")
 
@@ -145,7 +140,7 @@ class vLLMRollout(BaseRollout):
             if hasattr(default_sampling_params, key):
                 sampling_kwargs[key] = getattr(config, key)
 
-        
+        print(f"Sampling params: {sampling_kwargs}.")
         self.sampling_params = SamplingParams(**sampling_kwargs)
 
     @contextmanager
@@ -172,7 +167,6 @@ class vLLMRollout(BaseRollout):
         position_ids: torch.Tensor = prompts.batch["position_ids"]
         eos_token_id: int = prompts.meta_info["eos_token_id"]
         batch_size = input_ids.size(0)
-        
 
         non_tensor_batch = prompts.non_tensor_batch
         batch_raw_prompt_ids = non_tensor_batch.pop("raw_prompt_ids")
@@ -202,39 +196,25 @@ class vLLMRollout(BaseRollout):
             completions: list[RequestOutput] = self.inference_engine.generate(
                 prompts=vllm_inputs, sampling_params=self.sampling_params, use_tqdm=self.use_tqdm
             )
-        
-        # completions: list[RequestOutput], len == B (프롬프트 개수)
-        # 각 completion.outputs 가 길이 n_actual 리스트
-        total_out = sum(len(c.outputs) for c in completions)
-        B = input_ids.size(0)
-        assert total_out % B == 0, f"total_out({total_out}) % B({B}) != 0"
-        n_actual = total_out // B
+            response_ids = [output.token_ids for completion in completions for output in completion.outputs]
+            response_ids = VF.pad_2d_list_to_length(
+                response_ids, self.pad_token_id, max_length=self.config.response_length
+            ).to(input_ids.device)
 
-
-        # 응답 토큰 평탄화: [B*n_actual, Lr_var]
-        response_ids = [out.token_ids for comp in completions for out in comp.outputs]
-
-        # 입력 쪽을 B -> B*n_actual 로 확장 (n_actual>1일 때만)
-        if n_actual > 1:
-            input_ids = input_ids.repeat_interleave(n_actual, dim=0)
-            attention_mask = attention_mask.repeat_interleave(n_actual, dim=0)
-            if position_ids is not None:
-                position_ids = position_ids.repeat_interleave(n_actual, dim=0)
-            if batch_multi_modal_data is not None:
-                # 리스트/사전이면 동일 패턴으로 interleave 해주는 함수 사용
-                batch_multi_modal_data = _repeat_interleave(batch_multi_modal_data, n_actual)
-
-        # 이제 response_ids 패딩 -> 텐서
-        response_ids = VF.pad_2d_list_to_length(
-            response_ids, self.pad_token_id, max_length=self.config.response_length
-        ).to(input_ids.device).long()
+            if self.sampling_params.n > 1:
+                batch_size = batch_size * self.sampling_params.n
+                input_ids = _repeat_interleave(input_ids, self.sampling_params.n)
+                attention_mask = _repeat_interleave(attention_mask, self.sampling_params.n)
+                position_ids = _repeat_interleave(position_ids, self.sampling_params.n)
+                if batch_multi_modal_data is not None:
+                    batch_multi_modal_data = _repeat_interleave(batch_multi_modal_data, self.sampling_params.n)
 
         sequence_ids = torch.cat([input_ids, response_ids], dim=-1)
         response_length = response_ids.size(1)
         delta_position_id = torch.arange(1, response_length + 1, device=position_ids.device)
-        delta_position_id = delta_position_id.view(1, -1).expand(B * n_actual, -1)
+        delta_position_id = delta_position_id.view(1, -1).expand(batch_size, -1)
         if position_ids.ndim == 3:  # qwen2vl mrope: (batch_size, 4, seq_length)
-            delta_position_id = delta_position_id.view(B * n_actual, 1, -1).expand(B * n_actual, position_ids.size(1), -1)
+            delta_position_id = delta_position_id.view(batch_size, 1, -1).expand(batch_size, position_ids.size(1), -1)
 
         # prompt: left pad + response: right pad
         # attention_mask: [0,0,0,0,1,1,1,1 | 1,1,1,0,0,0,0,0]
@@ -256,7 +236,7 @@ class vLLMRollout(BaseRollout):
                 "response_mask": response_mask,
                 "position_ids": position_ids,
             },
-            batch_size=B * n_actual,
+            batch_size=batch_size,
         )
         if batch_multi_modal_data is not None:
             non_tensor_batch = {"multi_modal_data": batch_multi_modal_data}

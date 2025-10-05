@@ -142,7 +142,12 @@ def weighted_kendall_tau(pi: List[int], a: List[float], gamma: float = 1.0) -> f
 def top1_acc(pi: List[int], a: List[float]) -> float:
     """1.0 if model's top-1 equals IV2's top-1; else 0.0"""
     top_iv2 = max(range(5), key=lambda i: a[i])
-    return 1.0 if pi[0] == top_iv2 else 0.0
+    if top_iv2 == pi[0]:
+        return 1.0
+    elif top_iv2 in pi[2:]:
+        return -1.0
+    else:
+        return 0.0
 
 # -----------------------------
 # Main reward API (single / batch)
@@ -209,9 +214,15 @@ def compute_reward(
 
     # 3) Top-1 (GT 제공 시 우선, 없으면 sim 최대값 기준)
     if isinstance(correct_cand_id, int) and 1 <= correct_cand_id <= 5:
-        r_t1 = 1.0 if pi[0] == (correct_cand_id - 1) else 0.0
+        if correct_cand_id-1 == pi[0]:
+            r_t1 = 1.0
+        elif correct_cand_id-1 in  pi[2:]:
+            r_t1 = -1.0
+        else:
+            r_t1 = 0.0
     else:
         r_t1  = top1_acc(pi, a)
+    # print(correct_cand_id, pi, r_t1)
 
     # Weighted blend (then clamp to [0,1])
     num = (#weights["rel_ndcg"] * r_rel +
@@ -239,7 +250,7 @@ def compute_rewards_batch(
     If zscore_normalize=True, z-normalize overall within the batch and squish to [0,1].
     """
 
-    weights = {"top1": 0.3, "format": 0.2, "kendall": 0.5}
+    weights = {"top1": 1.0, "format": 0.0, "kendall": 0.0}
 
     outs = [compute_reward(x, weights=weights, kendall_gamma=kendall_gamma) for x in batch_inputs]
     # if zscore_normalize and len(outs) >= 2:

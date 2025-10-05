@@ -4,10 +4,10 @@
 
 # 설정
 DATASET="/home/work/smoretalk/seo/reranking/evaluation/evaluation_dataset.json"
-MODEL_PATH="/home/work/smoretalk/seo/reranking/sft_training/outputs"
+MODEL_PATH="Qwen/Qwen2.5-VL-3B-Instruct"
 OUTPUT_DIR="./output/parallel_eval_$(date +%Y%m%d_%H%M%S)"
 FINAL_OUTPUT="./output/parallel_eval_$(date +%Y%m%d_%H%M%S)/parallel_evaluation_result.json"
-NUM_CHUNKS=8
+NUM_CHUNKS=1
 
 echo "=== 병렬 평가 시작 ==="
 echo "데이터셋: $DATASET"

@@ -182,26 +182,40 @@ def merge_results(output_files: List[str], final_output: str):
                 with open(output_file, 'r') as f:
                     chunk_results = json.load(f)
                 
-                all_results.extend(chunk_results['detailed_results'])
+                # detailed_results 확장
+                if 'detailed_results' in chunk_results:
+                    all_results.extend(chunk_results['detailed_results'])
                 
-                # 메트릭 누적
-                metrics = chunk_results['metrics']
-                total_metrics['r1_sim_correct'] += metrics['r1_sim_correct']
-                total_metrics['r1_truth_correct'] += metrics['r1_truth_correct']
-                total_metrics['total_samples'] += metrics['total_samples']
-                total_metrics['ndcg_scores'].extend(metrics['ndcg_scores'])
-                
-                # 케이스 타입별 통계 누적
-                for case_type, stats in metrics['case_type_stats'].items():
-                    if case_type not in total_metrics['case_type_stats']:
-                        total_metrics['case_type_stats'][case_type] = {
-                            'count': 0, 'r1_sim': 0, 'r1_truth': 0, 'ndcg_scores': []
-                        }
+                # overall_metrics에서 메트릭 추출
+                if 'overall_metrics' in chunk_results:
+                    metrics = chunk_results['overall_metrics']
+                    total_metrics['r1_sim_correct'] += int(metrics['r1_sim_score'] * metrics['total_samples'])
+                    total_metrics['r1_truth_correct'] += int(metrics['r1_truth_score'] * metrics['total_samples'])
+                    total_metrics['total_samples'] += metrics['total_samples']
                     
-                    total_metrics['case_type_stats'][case_type]['count'] += stats['count']
-                    total_metrics['case_type_stats'][case_type]['r1_sim'] += stats['r1_sim']
-                    total_metrics['case_type_stats'][case_type]['r1_truth'] += stats['r1_truth']
-                    total_metrics['case_type_stats'][case_type]['ndcg_scores'].extend(stats['ndcg_scores'])
+                    # ndcg는 detailed_results에서 추출
+                    if 'detailed_results' in chunk_results:
+                        for result in chunk_results['detailed_results']:
+                            total_metrics['ndcg_scores'].append(result.get('ndcg', 0))
+                
+                # case_analysis에서 케이스 타입별 통계 누적
+                if 'case_analysis' in chunk_results:
+                    for case_type, stats in chunk_results['case_analysis'].items():
+                        if case_type not in total_metrics['case_type_stats']:
+                            total_metrics['case_type_stats'][case_type] = {
+                                'count': 0, 'r1_sim': 0, 'r1_truth': 0, 'ndcg_scores': []
+                            }
+                        
+                        sample_count = stats['sample_count']
+                        total_metrics['case_type_stats'][case_type]['count'] += sample_count
+                        total_metrics['case_type_stats'][case_type]['r1_sim'] += int(stats['r1_sim_score'] * sample_count)
+                        total_metrics['case_type_stats'][case_type]['r1_truth'] += int(stats['r1_truth_score'] * sample_count)
+                        
+                        # 해당 케이스 타입의 ndcg 수집
+                        if 'detailed_results' in chunk_results:
+                            for result in chunk_results['detailed_results']:
+                                if result['case_type'] == case_type:
+                                    total_metrics['case_type_stats'][case_type]['ndcg_scores'].append(result.get('ndcg', 0))
             
             pbar.update(1)
     

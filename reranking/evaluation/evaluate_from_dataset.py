@@ -45,48 +45,90 @@ class QwenVLDatasetEvaluator:
         self.chat_model = ChatModel(args)
         
         # 시스템 프롬프트
-        self.system_prompt = """You are RankLLM, a vision-only reranker. You will receive a Query and N candidates. Each candidate is composed of 12 sampled frames.
+#         self.system_prompt = """You are RankLLM, a vision-only reranker. You will receive a Query and N candidates. Each candidate is composed of 12 sampled frames.
+
+# Decision rules (concise):
+# - Judge relevance ONLY from what is visible in the grids.
+# - Down-rank clear mismatches (wrong domain/scene/action). Consider temporal coherence.
+# - Tie-breakers (in order): action visibility/close-up > temporal coherence > low occlusion/clutter > overall coverage.
+
+# ABSOLUTE OUTPUT CONTRACT (exactly two blocks; no extra text/markdown):
+# <think>
+# <content>
+# [1] short description of visible content only.
+# [2] short description of visible content only.
+# [3] ...
+# [4] ...
+# [5] ...
+# </content>
+
+# <notes>
+# [1] brief note on alignment/conflict with the query.
+# [2] brief note on alignment/conflict with the query.
+# [3] ...
+# [4] ...
+# [5] ...
+# </notes>
+
+# <contrast>
+# - One-liner: why a higher-ranked item beats a lower-ranked item (because/whereas style).
+# - Add a few more one-liners as needed.
+# </contrast>
+
+# <rationale>
+# 1st=[i] (reason)
+# 2nd=[j] (reason)
+# 3rd=[k] (reason)
+# 4th=[m] (reason)
+# 5th=[n] (reason)
+# </rationale>
+# </think>
+# <answer> [i] > [j] > [k] > [m] > [n] </answer>
+
+# Constraints:
+# - Inside <think>, use ONLY the section tags <content>, <notes>, <contrast>, <rationale>.
+# - Do NOT use any per-candidate XML-like tags (e.g., no <cand .../>); write lines as [N] text...
+# - Keep all statements evidence-based from the grids; no speculation.
+# - Always produce a total order in <answer> using indices [1]..[N].
+
+# Query: "{query}"
+
+# Candidates:
+# {candidates}"""
+    system_prompt = """You are RankLLM, a vision-only reranker. You will receive a Query and N candidates. Each candidate is composed of 12 uniform sampled frames from video.
 
 Decision rules (concise):
-- Judge relevance ONLY from what is visible in the grids.
+- Judge relevance ONLY from what is visible in the frames.
 - Down-rank clear mismatches (wrong domain/scene/action). Consider temporal coherence.
 - Tie-breakers (in order): action visibility/close-up > temporal coherence > low occlusion/clutter > overall coverage.
 
-ABSOLUTE OUTPUT CONTRACT (exactly two blocks; no extra text/markdown):
+ABSOLUTE OUTPUT CONTRACT :
 <think>
 <content>
-[1] short description of visible content only.
-[2] short description of visible content only.
+[1] Describe the content of the video and its relation to the query, aware of temporal sequence and spatial information.
+[2] ...
 [3] ...
 [4] ...
 [5] ...
 </content>
 
-<notes>
-[1] brief note on alignment/conflict with the query.
-[2] brief note on alignment/conflict with the query.
-[3] ...
-[4] ...
-[5] ...
-</notes>
-
 <contrast>
-- One-liner: why a higher-ranked item beats a lower-ranked item (because/whereas style).
+- One-liner: why a higher-ranked item beats a lower-ranked item (because/whereas style). 
 - Add a few more one-liners as needed.
 </contrast>
 
-<rationale>
-1st=[i] (reason)
-2nd=[j] (reason)
-3rd=[k] (reason)
-4th=[m] (reason)
-5th=[n] (reason)
-</rationale>
+<summary>
+1st=[i] (sufficient reasoning)
+2nd=[j] (sufficient reasoning)
+3rd=[k] (sufficient reasoning)
+4th=[m] (sufficient reasoning)
+5th=[n] (sufficient reasoning)
+</summary>
 </think>
 <answer> [i] > [j] > [k] > [m] > [n] </answer>
 
 Constraints:
-- Inside <think>, use ONLY the section tags <content>, <notes>, <contrast>, <rationale>.
+- Inside <think>, use ONLY the section tags <content>, <contrast>, <summary>.
 - Do NOT use any per-candidate XML-like tags (e.g., no <cand .../>); write lines as [N] text...
 - Keep all statements evidence-based from the grids; no speculation.
 - Always produce a total order in <answer> using indices [1]..[N].
@@ -94,7 +136,8 @@ Constraints:
 Query: "{query}"
 
 Candidates:
-{candidates}"""
+{candidates}
+"""
 
     def load_evaluation_dataset(self, dataset_path: str) -> Dict[str, Any]:
         """평가 데이터셋 로드"""

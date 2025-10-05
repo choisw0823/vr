@@ -70,18 +70,22 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> dict[str
         "critic/score/mean": torch.mean(sequence_score).detach().item(),
         "critic/score/max": torch.max(sequence_score).detach().item(),
         "critic/score/min": torch.min(sequence_score).detach().item(),
+        "critic/score/std": torch.std(sequence_score).detach().item(),
         # reward
         "critic/rewards/mean": torch.mean(sequence_reward).detach().item(),
         "critic/rewards/max": torch.max(sequence_reward).detach().item(),
         "critic/rewards/min": torch.min(sequence_reward).detach().item(),
+        "critic/rewards/std": torch.std(sequence_reward).detach().item(),
         # adv
         "critic/advantages/mean": torch.mean(valid_adv).detach().item(),
         "critic/advantages/max": torch.max(valid_adv).detach().item(),
         "critic/advantages/min": torch.min(valid_adv).detach().item(),
+        "critic/advantages/std": torch.std(valid_adv).detach().item(),
         # returns
         "critic/returns/mean": torch.mean(valid_returns).detach().item(),
         "critic/returns/max": torch.max(valid_returns).detach().item(),
         "critic/returns/min": torch.min(valid_returns).detach().item(),
+        "critic/returns/std": torch.std(valid_returns).detach().item(),
         **(
             {
                 # values
@@ -100,7 +104,10 @@ def compute_data_metrics(batch: DataProto, use_critic: bool = False) -> dict[str
     # ranking reward 세부 메트릭 추가
     ranking_metrics = compute_ranking_metrics(batch)
     
-    return {**base_metrics, **ranking_metrics}
+    # GRPO 특화 메트릭 추가
+    grpo_metrics = compute_grpo_metrics(batch)
+    
+    return {**base_metrics, **ranking_metrics, **grpo_metrics}
 
 
 def compute_ranking_metrics(batch: DataProto) -> dict[str, Any]:
@@ -124,6 +131,64 @@ def compute_ranking_metrics(batch: DataProto) -> dict[str, Any]:
                 })
     
     return ranking_metrics
+
+
+def compute_grpo_metrics(batch: DataProto) -> dict[str, Any]:
+    """GRPO 특화 메트릭을 계산합니다."""
+    grpo_metrics = {}
+    
+    # 현재 사용 가능한 데이터로 GRPO 메트릭 계산
+    sequence_reward = batch.batch["token_level_rewards"].sum(-1)
+    advantages = batch.batch["advantages"]
+    returns = batch.batch["returns"]
+    
+    max_response_length = batch.batch["responses"].size(-1)
+    response_mask = batch.batch["attention_mask"][:, -max_response_length:].bool()
+    valid_adv = torch.masked_select(advantages, response_mask)
+    valid_returns = torch.masked_select(returns, response_mask)
+    
+    # GRPO 특화 통계 (샘플별 분석)
+    batch_size = sequence_reward.size(0)
+    
+    # 샘플별 reward 통계
+    grpo_metrics.update({
+        "grpo/reward_per_sample/mean": torch.mean(sequence_reward).detach().item(),
+        "grpo/reward_per_sample/std": torch.std(sequence_reward).detach().item(),
+        "grpo/reward_per_sample/max": torch.max(sequence_reward).detach().item(),
+        "grpo/reward_per_sample/min": torch.min(sequence_reward).detach().item(),
+    })
+    
+    # 샘플별 advantage 통계
+    sample_advantages = []
+    for i in range(batch_size):
+        sample_adv = advantages[i][response_mask[i]]
+        if len(sample_adv) > 0:
+            sample_advantages.append(torch.mean(sample_adv).item())
+    
+    if sample_advantages:
+        grpo_metrics.update({
+            "grpo/advantage_per_sample/mean": np.mean(sample_advantages),
+            "grpo/advantage_per_sample/std": np.std(sample_advantages),
+            "grpo/advantage_per_sample/max": np.max(sample_advantages),
+            "grpo/advantage_per_sample/min": np.min(sample_advantages),
+        })
+    
+    # 샘플별 return 통계
+    sample_returns = []
+    for i in range(batch_size):
+        sample_ret = returns[i][response_mask[i]]
+        if len(sample_ret) > 0:
+            sample_returns.append(torch.mean(sample_ret).item())
+    
+    if sample_returns:
+        grpo_metrics.update({
+            "grpo/return_per_sample/mean": np.mean(sample_returns),
+            "grpo/return_per_sample/std": np.std(sample_returns),
+            "grpo/return_per_sample/max": np.max(sample_returns),
+            "grpo/return_per_sample/min": np.min(sample_returns),
+        })
+    
+    return grpo_metrics
 
 
 def compute_timing_metrics(batch: DataProto, timing_raw: dict[str, float]) -> dict[str, Any]:

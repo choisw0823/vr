@@ -376,7 +376,7 @@ def main():
                        help="Maximum number of texts to process (for testing)")
     parser.add_argument("--frames_per_candidate", type=int, default=12,
                        help="Number of frames to extract per video")
-    parser.add_argument("--combinations_per_text", type=int, default=3,
+    parser.add_argument("--combinations_per_text", type=int, default=1,
                        help="Number of combinations per text")
     parser.add_argument("--videos_per_combination", type=int, default=5,
                        help="Number of videos per combination")

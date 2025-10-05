@@ -1,7 +1,7 @@
 data:
   # === Geometry3K 경로 ===
   train_files: /home/work/smoretalk/seo/reranking/r1/data/msrvtt_ranking_dataset.json
-  val_files: /home/work/smoretalk/seo/reranking/r1/data/val_ranking_dataset.json
+  val_files: /home/work/smoretalk/seo/reranking/r1/data/val_ranking_dataset.json 
 
   # === 컬럼 매핑 (RankLLMRerankDataset은 고정 구조 사용) ===
   # prompt_key: query (고정)
@@ -41,7 +41,7 @@ algorithm:
 
 worker:
   actor:
-    global_batch_size: 4
+    global_batch_size: 8
     micro_batch_size_per_device_for_update: 1
     micro_batch_size_per_device_for_experience: 1
     max_grad_norm: 1.0
